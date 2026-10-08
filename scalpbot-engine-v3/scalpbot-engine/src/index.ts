@@ -19,11 +19,10 @@ import { marketOpen } from "./levels/sessions.js";
 import { createServer } from "node:http";
 import { readFileSync, writeFileSync } from "node:fs";
 
-const DRY = process.argv.includes("--dry-run");
 const cfg = loadConfig();
 registerSecrets(cfg.OANDA_TOKEN, cfg.WORKER_SECRET);
 const STATE_FILE = process.env["STATE_FILE"] ?? "./scalpbot-state.json";
-const api = new LovableApi(cfg, DRY);
+const api = new LovableApi(cfg);
 const store = new CandleStore();
 const news = new NewsSource();
 const quotes = new Map<Instrument, Quote>();
@@ -181,7 +180,7 @@ async function runStream() {
 
 const timers: ReturnType<typeof setInterval>[] = [];
 async function main() {
-  log("start", { env: cfg.OANDA_ENV, dry_run: DRY });
+  log("start", { env: cfg.OANDA_ENV });
   await Promise.all([refreshConfig(), news.refresh(true)]);
   await backfill();
   await flush();
@@ -201,7 +200,7 @@ async function main() {
     const age = Date.now() - guard.lastTick;
     const ok = !marketOpen(Date.now()) || age < 120_000;
     res.writeHead(req.url === "/health" ? (ok ? 200 : 503) : 404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok, last_tick_ms: age, stale, queued_signals: outbox2.size, dry_run: DRY }));
+    res.end(JSON.stringify({ ok, last_tick_ms: age, stale, queued_signals: outbox2.size }));
   }).listen(port, () => log("health_listening", { port }));
   void api.event("heartbeat").catch(() => {});
   await runStream();
