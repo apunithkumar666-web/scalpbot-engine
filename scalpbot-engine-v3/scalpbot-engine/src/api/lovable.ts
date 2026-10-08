@@ -2,6 +2,7 @@ import { z } from "zod";
 import { appPair, type Config } from "../config.js";
 import type { Candle } from "../candles/types.js";
 import { HttpError } from "../outbox.js";
+import { log } from "../logger.js";
 
 export const Settings = z.object({
   window_start: z.string().default("18:30"),
@@ -23,6 +24,9 @@ export const Settings = z.object({
 });
 export type Settings = z.infer<typeof Settings>;
 export type EventType = "tp1_alert" | "be_alert" | "trail_alert" | "sl_near" | "heartbeat" | "data_gap" | "news_block" | "time_stop" | "news_warn";
+
+/** Trade alerts reach users, so they are suppressed (printed only) in --dry-run. */
+const TRADE_ALERTS: ReadonlySet<EventType> = new Set<EventType>(["tp1_alert", "be_alert", "trail_alert", "sl_near", "time_stop"]);
 
 export const Stats = z.object({
   signals_this_window: z.number().default(0),
@@ -46,16 +50,18 @@ export const OpenTrade = z.object({
 export type OpenTrade = z.infer<typeof OpenTrade>;
 
 export class LovableApi {
-  /** Calls actually sent (POSTs); used to prove --dry-run sends nothing. */
+  /** POSTs actually sent to the backend. Non-zero in --dry-run too, since only ingest-signal and trade alerts are suppressed. */
   sent = 0;
   constructor(private cfg: Config, private dryRun = false, private fetchImpl: typeof fetch = fetch) {}
 
   private async call(path: string, init: RequestInit = {}, attempt = 0): Promise<unknown> {
-    if (init.method === "POST") this.sent++;
+    const method = init.method ?? "GET";
+    if (method === "POST") this.sent++;
     const res = await this.fetchImpl(`${this.cfg.LOVABLE_FN_URL}/${path}`, {
       ...init,
       headers: { "Content-Type": "application/json", "x-worker-secret": this.cfg.WORKER_SECRET, ...(init.headers ?? {}) },
     });
+    log("http", { method, path, status: res.status, attempt });
     if ((res.status === 429 || res.status >= 500) && attempt < 3) {
       await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt + Math.random() * 300));
       return this.call(path, init, attempt + 1);
@@ -66,7 +72,7 @@ export class LovableApi {
   }
 
   async ingestCandles(candles: Candle[]) {
-    if (!candles.length || this.dryRun) return;
+    if (!candles.length) return;
     for (let i = 0; i < candles.length; i += 1000) {
       const batch = candles.slice(i, i + 1000).map((c) => ({
         pair: appPair(c.instrument), tf: c.tf, ts: new Date(c.t).toISOString(),
@@ -78,7 +84,8 @@ export class LovableApi {
 
   event(type: EventType, text?: string, trade_id?: string, extra: { mae?: number; mfe?: number } = {}) {
     const body = { type, ...(text ? { text } : {}), ...(trade_id ? { trade_id } : {}), ...extra };
-    if (this.dryRun) { if (type === "heartbeat") return Promise.resolve(null); console.log(JSON.stringify({ dry_run: "event", ...body })); return Promise.resolve(null); }
+    // In dry-run only trade alerts are suppressed; heartbeats and other events are sent so liveness stays accurate.
+    if (this.dryRun && TRADE_ALERTS.has(type)) { console.log(JSON.stringify({ dry_run: "event", ...body })); return Promise.resolve(null); }
     return this.call("ingest-event", { method: "POST", body: JSON.stringify(body) });
   }
 
@@ -101,12 +108,12 @@ export class LovableApi {
 
   skips(skips: Record<string, unknown>[]) {
     if (!skips.length) return Promise.resolve(null);
-    if (this.dryRun) return Promise.resolve(null);
+    // Not a signal or trade alert, so it is sent in dry-run as well.
     return this.call("ingest-skip", { method: "POST", body: JSON.stringify({ skips: skips.slice(0, 200) }) });
   }
 
   strategyStatus(strategy: string, enabled: boolean, reason: string) {
-    if (this.dryRun) { console.log(JSON.stringify({ dry_run: "strategy_status", strategy, enabled, reason })); return Promise.resolve(null); }
+    // Not a signal or trade alert, so it is sent in dry-run as well.
     return this.call("strategy-status", { method: "POST", body: JSON.stringify({ strategy, enabled, reason }) });
   }
 }
