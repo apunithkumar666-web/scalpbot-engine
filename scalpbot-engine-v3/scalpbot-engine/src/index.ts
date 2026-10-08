@@ -1,4 +1,4 @@
-import { BACKFILL_COUNT, HEARTBEAT_MS, INSTRUMENTS, RECONCILE_DELAY_MS, SETTINGS_MS, STALE_MS, TFS, TF_SECONDS, appPair, loadConfig, type Instrument } from "./config.js";
+import { BACKFILL_COUNT, HEARTBEAT_MS, INSTRUMENTS, RECONCILE_DELAY_MS, SETTINGS_MS, TFS, TF_SECONDS, appPair, loadConfig, type Instrument } from "./config.js";
 import { CandleBuilder } from "./candles/builder.js";
 import { CandleStore } from "./candles/store.js";
 import { reconcile } from "./candles/reconcile.js";
@@ -11,7 +11,8 @@ import { NewsSource } from "./news.js";
 import { TradeManager, type Quote } from "./manager.js";
 import { buildCtx } from "./context.js";
 import { evaluate } from "./evaluate.js";
-import { newPairState, type PairState } from "./types.js";
+import { isPreArmEnabled, planPreArmSignals, preArmEventFor, resolvePreArmSettings, type PreArmSettings } from "./prearm.js";
+import { newPairState, type ArmedSetup, type PairState } from "./types.js";
 import { log, logError, registerSecrets } from "./logger.js";
 import { SignalOutbox } from "./outbox.js";
 import { FeedGuard } from "./guard.js";
@@ -28,6 +29,7 @@ const store = new CandleStore();
 const news = new NewsSource();
 const quotes = new Map<Instrument, Quote>();
 const pairState = new Map<Instrument, PairState>(INSTRUMENTS.map((i) => [i, newPairState()]));
+const armedSetups = new Map<Instrument, ArmedSetup[]>(INSTRUMENTS.map((i) => [i, []]));
 let wc: WorkerConfig | null = null;
 const guard = new FeedGuard(Date.now());
 let stale = false;
@@ -45,10 +47,19 @@ const builder = new CandleBuilder((c) => {
   setTimeout(() => void reconcileLast(c), RECONCILE_DELAY_MS);
   if (c.tf === "M5") {
     void manager.onM5Close(c.instrument, c.c);
-    // evaluate after the REST reconcile so the bar is authoritative
     setTimeout(() => void onM5Close(c.instrument, c.t + TF_SECONDS.M5 * 1000), RECONCILE_DELAY_MS + 1500);
   }
 });
+
+function preArmEnabled() { return !!wc && isPreArmEnabled(wc.settings); }
+
+function keepArmedSetup(instrument: Instrument, setup: ArmedSetup) {
+  const list = armedSetups.get(instrument) ?? [];
+  const key = `${setup.pair}:${setup.side}:${setup.strategy}:${setup.E}`;
+  if (list.some((x) => `${x.pair}:${x.side}:${x.strategy}:${x.E}` === key)) return;
+  list.push(setup);
+  armedSetups.set(instrument, list);
+}
 
 async function onM5Close(instrument: Instrument, closeT: number) {
   if (!wc) return;
@@ -62,6 +73,14 @@ async function onM5Close(instrument: Instrument, closeT: number) {
     bid: q.bid, ask: q.ask, settings: wc.settings, commissionPerLot: wc.commissionPerLot, news, state, stale,
     openTrades: Math.max(wc.stats.open_trades, manager.openCount), signalsThisWindow: wc.stats.signals_this_window + signalsSent,
   });
+
+  if (preArmEnabled()) {
+    const outcomes = evaluate(ctx);
+    const armed = planPreArmSignals({ outcomes, settings: wc.settings, now: closeT, });
+    for (const a of armed) keepArmedSetup(instrument, a);
+    return;
+  }
+
   const outcomes = evaluate(ctx);
   const skips: Record<string, unknown>[] = [];
   for (const o of outcomes) {
@@ -117,7 +136,8 @@ async function refreshConfig() {
     const next = await api.config();
     if (!next) return;
     wc = next;
-    signalsSent = 0; // app counters now include what we sent
+    log("pre_arm_enabled", { enabled: isPreArmEnabled(next.settings) });
+    signalsSent = 0;
     for (const i of INSTRUMENTS) {
       const st = pairState.get(i)!;
       const loss = next.stats.last_loss_at[appPair(i)];
@@ -131,7 +151,6 @@ async function refreshConfig() {
   } catch (e) { logError("config_failed", e); }
 }
 
-/** Live gate: auto-disable a strategy when live expectancy < 0 after 50 signals. */
 async function liveGate() {
   if (!wc) return;
   for (const [strategy, s] of Object.entries(wc.stats.strategy_live)) {
@@ -170,7 +189,6 @@ async function runStream() {
     } catch (e) { if (!ctl.signal.aborted) logError("stream_error", e); }
     finally { clearInterval(watch); }
     builder.reset();
-    // closed market: wait calmly instead of hammering OANDA
     const wait = marketOpen(Date.now()) ? backoff : 5 * 60_000;
     await new Promise((r) => setTimeout(r, wait + Math.random() * 250));
     backoff = Math.min(backoff * 2, 60_000);
@@ -221,6 +239,4 @@ async function shutdown(sig: string) {
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("unhandledRejection", (e) => logError("unhandled_rejection", e));
-// crash -> exit non-zero so the host (Railway/Render/Fly) restarts the worker
-// wait 30s before exiting so a crash loop can't hammer OANDA or the app
 main().catch((e) => { logError("fatal", e); setTimeout(() => process.exit(1), 30_000); });
