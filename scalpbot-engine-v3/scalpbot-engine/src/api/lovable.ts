@@ -46,9 +46,9 @@ export const OpenTrade = z.object({
 export type OpenTrade = z.infer<typeof OpenTrade>;
 
 export class LovableApi {
-  /** Calls actually sent (POSTs); used to prove --dry-run sends nothing. */
+  /** Number of POST calls sent. */
   sent = 0;
-  constructor(private cfg: Config, private dryRun = false, private fetchImpl: typeof fetch = fetch) {}
+  constructor(private cfg: Config, private fetchImpl: typeof fetch = fetch) {}
 
   private async call(path: string, init: RequestInit = {}, attempt = 0): Promise<unknown> {
     if (init.method === "POST") this.sent++;
@@ -66,7 +66,7 @@ export class LovableApi {
   }
 
   async ingestCandles(candles: Candle[]) {
-    if (!candles.length || this.dryRun) return;
+    if (!candles.length) return;
     for (let i = 0; i < candles.length; i += 1000) {
       const batch = candles.slice(i, i + 1000).map((c) => ({
         pair: appPair(c.instrument), tf: c.tf, ts: new Date(c.t).toISOString(),
@@ -78,7 +78,6 @@ export class LovableApi {
 
   event(type: EventType, text?: string, trade_id?: string, extra: { mae?: number; mfe?: number } = {}) {
     const body = { type, ...(text ? { text } : {}), ...(trade_id ? { trade_id } : {}), ...extra };
-    if (this.dryRun) { if (type === "heartbeat") return Promise.resolve(null); console.log(JSON.stringify({ dry_run: "event", ...body })); return Promise.resolve(null); }
     return this.call("ingest-event", { method: "POST", body: JSON.stringify(body) });
   }
 
@@ -95,18 +94,15 @@ export class LovableApi {
 
   /** POST ingest-signal; the HTTP layer already retries 3x with backoff on 429/5xx. */
   signal(sig: Record<string, unknown>) {
-    if (this.dryRun) { console.log(JSON.stringify({ dry_run: "signal", ...sig })); return Promise.resolve({ ok: true, dry_run: true }); }
     return this.call("ingest-signal", { method: "POST", body: JSON.stringify(sig) });
   }
 
   skips(skips: Record<string, unknown>[]) {
     if (!skips.length) return Promise.resolve(null);
-    if (this.dryRun) return Promise.resolve(null);
     return this.call("ingest-skip", { method: "POST", body: JSON.stringify({ skips: skips.slice(0, 200) }) });
   }
 
   strategyStatus(strategy: string, enabled: boolean, reason: string) {
-    if (this.dryRun) { console.log(JSON.stringify({ dry_run: "strategy_status", strategy, enabled, reason })); return Promise.resolve(null); }
     return this.call("strategy-status", { method: "POST", body: JSON.stringify({ strategy, enabled, reason }) });
   }
 }

@@ -54,16 +54,13 @@ Historical news is not available from the free calendar, so backtests only honou
 
 Live: the engine checks weekly and auto-disables a strategy whose live expectancy is below 0 after 50 trades.
 
-## Dry run
-`npm run start:dry` — prints signals and alerts instead of sending them (candles and heartbeats still go to the app).
-
 ## v3 audit changes
 - EURUSD max spread from the app (pips, e.g. 1.2) is converted to price (0.00012). Before, the EUR spread filter never blocked.
 - Score threshold = max(profile min, app min_score).
 - Previous-day high/low skips weekends/holidays.
 - Signals that can't reach the app are queued and retried until they expire (never sent late); refused (4xx) signals are dropped.
 - Feed watchdog: no ticks 5s (market open) → scanning paused + one data_gap alert; silent connection 10s → reconnect with backoff + backfill. No alerts/reconnect storms on weekends.
-- `--dry-run` now sends nothing at all (no candles, heartbeats, signals, alerts).
+- Failed HTTP calls to the app are reported with their status code (`HTTP <status>`) in the error log.
 - Trade-alert state is saved to `STATE_FILE` (default `./scalpbot-state.json`) so restarts don't repeat alerts. Use a persistent volume.
 - Tokens are redacted from logs. A fatal error waits 30s before exiting (crash-loop protection).
 - Optional `PORT` env: `GET /health` → 200 when ticks are fresh (or market closed), 503 when stale. Point your host's health check at it.

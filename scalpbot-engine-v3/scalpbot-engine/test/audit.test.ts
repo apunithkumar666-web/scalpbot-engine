@@ -454,16 +454,6 @@ describe("13 security and ops", () => {
     expect(() => loadConfig({ OANDA_TOKEN: "short" })).toThrow();
     expect(loadConfig({ OANDA_TOKEN: "x".repeat(20), OANDA_ACCOUNT_ID: "101-001", LOVABLE_FN_URL: "https://a.b/api/", WORKER_SECRET: "y".repeat(20) }).LOVABLE_FN_URL).toBe("https://a.b/api");
   });
-  it("--dry-run sends nothing", async () => {
-    const f = vi.fn(async () => new Response("{}"));
-    const cfg = loadConfig({ OANDA_TOKEN: "x".repeat(20), OANDA_ACCOUNT_ID: "101-001", LOVABLE_FN_URL: "https://a.b", WORKER_SECRET: "y".repeat(20) });
-    const api = new LovableApi(cfg, true, f as unknown as typeof fetch);
-    vi.spyOn(console, "log").mockImplementation(() => {});
-    await api.signal({ a: 1 }); await api.event("heartbeat"); await api.event("tp1_alert", "x");
-    await api.skips([{ a: 1 }]); await api.strategyStatus("orb", false, "x");
-    await api.ingestCandles([{ instrument: "XAU_USD", tf: "M1", t: 0, o: 1, h: 1, l: 1, c: 1, ticks: 1, avgSpread: 0, maxSpread: 0, source: "stream" }]);
-    expect(f).not.toHaveBeenCalled();
-  });
   it("memory bounded over a simulated 24h of ticks", () => {
     const store = new CandleStore();
     const b = new CandleBuilder((c) => store.upsert(c));

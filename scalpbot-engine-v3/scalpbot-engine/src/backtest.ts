@@ -49,7 +49,7 @@ async function main() {
   console.log("Wrote backtest-out/report.json and equity CSVs");
 
   if (process.argv.includes("--apply")) {
-    const api = new LovableApi(cfg, process.argv.includes("--dry-run"));
+    const api = new LovableApi(cfg);
     for (const [s, g] of Object.entries(gates)) await api.strategyStatus(s, g.pass, g.pass ? "passed backtest live gate" : `failed live gate: ${g.reasons.join("; ")}`);
   }
 }

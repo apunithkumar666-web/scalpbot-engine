@@ -7,7 +7,6 @@
   "scripts": {
     "build": "tsc -p .",
     "start": "node dist/index.js",
-    "start:dry": "node dist/index.js --dry-run",
     "backtest": "node dist/backtest.js",
     "dev": "tsx watch src/index.ts",
     "test": "vitest run",
