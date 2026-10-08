@@ -19,6 +19,7 @@ const STRATS: Record<StrategyName, (c: EvalCtx) => Setup | null> = { pullback, s
 
 /** Evaluate all strategies for one pair on a just-closed M5 bar. Used by live and backtest. */
 export function evaluate(ctx: EvalCtx): Outcome[] {
+  if (ctx.settings.pre_arm_enabled) return [];
   const pair = appPair(ctx.instrument);
   const base = baseFeatures(ctx);
   const g = globalFilter(ctx);
@@ -51,8 +52,8 @@ export function evaluate(ctx: EvalCtx): Outcome[] {
       atrPct: ctx.snap.m5.atrPct, t: ctx.t, costRatio: st.costRatio, counterTrend: setup.counterTrend,
       newsWithin30: ctx.news.soon(ctx.t, 30) !== null,
     });
-    const features = { ...base, setup: setup.notes, pattern: setup.pattern, level_used: setup.levelUsed ?? null, score: sc, rr1: st.rr1, rr2: st.rr2, cost_ratio: st.costRatio, path_r: st.pathR, tp2_capped: st.tp2Capped };
-    const minScore = Math.max(prof.minScore, ctx.settings.min_score); // app setting is a floor too
+    const features = { ...base, setup: setup.notes, pattern: setup.pattern, level_used: setup.levelUsed ?? null, score: sc, rr1: st.rr1, rr2: st.rr2, cost_ratio: st.costRatio, path_r: st.pathR, tp1_r: st.tp1R, tp2_r: st.tp2R };
+    const minScore = Math.max(prof.minScore, ctx.settings.min_score);
     if (sc.total < minScore) { out.push(skip(`score ${sc.total} < ${minScore}`, { score: sc })); continue; }
 
     out.push({
