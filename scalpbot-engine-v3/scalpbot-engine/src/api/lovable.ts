@@ -18,6 +18,14 @@ export const Settings = z.object({
   loss_halt_n: z.number().default(3),
   spread_max_xau: z.number().default(0.5),
   spread_max_eur: z.number().default(0.00015),
+  pre_arm_enabled: z.boolean().default(false),
+  arm_lead_sec: z.number().default(60),
+  final_lead_sec: z.number().default(10),
+  stability_window_sec: z.number().default(15),
+  stability_pct: z.number().default(80),
+  arm_min_score_delta: z.number().default(5),
+  max_chase_atr: z.number().default(0.25),
+  max_tick_age_sec: z.number().default(3),
   paused: z.boolean().default(false),
   profile: z.enum(["conservative", "standard", "aggressive"]).default("aggressive"),
 });
@@ -46,7 +54,6 @@ export const OpenTrade = z.object({
 export type OpenTrade = z.infer<typeof OpenTrade>;
 
 export class LovableApi {
-  /** Calls actually sent (POSTs); used to prove --dry-run sends nothing. */
   sent = 0;
   constructor(private cfg: Config, private dryRun = false, private fetchImpl: typeof fetch = fetch) {}
 
@@ -93,7 +100,6 @@ export class LovableApi {
     return (r?.trades ?? []).flatMap((t) => { const p = OpenTrade.safeParse(t); return p.success ? [p.data] : []; });
   }
 
-  /** POST ingest-signal; the HTTP layer already retries 3x with backoff on 429/5xx. */
   signal(sig: Record<string, unknown>) {
     if (this.dryRun) { console.log(JSON.stringify({ dry_run: "signal", ...sig })); return Promise.resolve({ ok: true, dry_run: true }); }
     return this.call("ingest-signal", { method: "POST", body: JSON.stringify(sig) });
