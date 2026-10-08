@@ -55,3 +55,16 @@ export interface Setup {
   levelUsed?: string;
   notes: Record<string, unknown>;
 }
+
+export interface ArmedSetup {
+  pair: "XAUUSD" | "EURUSD";
+  side: Side;
+  strategy: StrategyName;
+  E: number;
+  invalidation_price: number;
+  provisional_entry: number;
+  provisional_sl: number;
+  provisional_tp: number;
+  score: number;
+  armed_at: number;
+}
